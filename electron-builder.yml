@@ -1,0 +1,40 @@
+appId: com.callu.desktop
+productName: Callu
+directories:
+  output: release
+asar: true
+asarUnpack:
+  - node_modules/uiohook-napi/**
+files:
+  - dist/**
+  - electron/dist/**
+extraResources:
+  - from: public/icon.png
+    to: icon.png
+  - from: public/Verification-Blue-Tick-PNG.png
+    to: Verification-Blue-Tick-PNG.png
+win:
+  target: nsis
+  requestedExecutionLevel: asInvoker
+  icon: public/icon.png
+mac:
+  icon: public/icon.png
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Network
+  icon: public/icon.png
+publish:
+  provider: github
+  owner: Sahnik0
+  repo: callu
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  runAfterFinish: true
+  differentialPackage: false
+

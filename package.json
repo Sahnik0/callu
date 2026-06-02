@@ -1,0 +1,60 @@
+{
+  "name": "callu-desktop",
+  "version": "2.0.0",
+  "description": "Callu Desktop Application",
+  "homepage": "https://callu-production.up.railway.app",
+  "author": {
+    "name": "Callu Developer",
+    "email": "support@callu-production.up.railway.app"
+  },
+  "main": "electron/dist/main.js",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && tsc -p electron/tsconfig.json",
+    "electron:dev": "concurrently \"vite\" \"wait-on tcp:5173 && tsc -p electron/tsconfig.json && electron . --no-sandbox\"",
+    "electron:build": "npm run build && electron-builder",
+    "electron:rebuild": "electron-rebuild -f -w uiohook-napi"
+  },
+  "dependencies": {
+    "@lottiefiles/dotlottie-react": "^0.17.15",
+    "clsx": "^2.1.1",
+    "electron-store": "^8.2.0",
+    "electron-updater": "^6.8.3",
+    "framer-motion": "^12.34.0",
+    "lenis": "^1.3.17",
+    "lottie-react": "^2.4.1",
+    "lucide-react": "^0.563.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "react-router-dom": "^6.22.3",
+    "react-youtube": "^10.1.0",
+    "simple-peer": "^9.11.1",
+    "socket.io-client": "^4.8.3",
+    "sonner": "^2.0.7",
+    "styled-components": "^6.4.2",
+    "tailwind-merge": "^3.4.0",
+    "uiohook-napi": "^1.5.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.0",
+    "@tailwindcss/vite": "^4.3.0",
+    "@types/node": "^20.11.24",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "@types/styled-components": "^5.1.36",
+    "@types/youtube-player": "^5.5.11",
+    "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^8.2.2",
+    "electron": "^29.1.0",
+    "electron-builder": "^24.13.3",
+    "electron-rebuild": "^3.2.9",
+    "jimp": "^1.6.1",
+    "png-to-ico": "^3.0.1",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^4.3.0",
+    "typescript": "^5.3.3",
+    "vite": "^8.0.14",
+    "wait-on": "^9.0.10"
+  }
+}

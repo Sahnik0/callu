@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["DOM", "DOM.Iterable", "ES2020"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    /* Linting */
+    "strict": true,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true
+    ,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "next/*": ["src/electron-patches/*"],
+      "next/navigation": ["src/electron-patches/next-navigation.ts"],
+      "next/link": ["src/electron-patches/next-link.tsx"]
+    },
+    "types": ["vite/client", "node"],
+    "ignoreDeprecations": "6.0"
+  },
+  "include": ["src", "electron/preload.ts"],
+  "exclude": ["node_modules", "electron/dist"]
+}
