@@ -1,0 +1,208 @@
+@import "tailwindcss";
+
+/* Allow normal page scrolling while keeping full-width layout */
+html, body, #root {
+  min-height: 100vh;
+  height: auto;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-dm: var(--font-dm-sans);
+  --font-playfair: var(--font-playfair);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.font-dm { font-family: var(--font-dm-sans); }
+.font-playfair { font-family: var(--font-playfair); }
+
+html.lenis, html.lenis body { height: auto; }
+.lenis.lenis-smooth { scroll-behavior: auto !important; }
+.lenis.lenis-smooth [data-lenis-prevent] { overscroll-behavior: contain; }
+.lenis.lenis-stopped { overflow: hidden; }
+.lenis.lenis-scrolling iframe { pointer-events: none; }
+
+@keyframes soundwave {
+  0%, 100% {
+    height: 3px;
+  }
+  50% {
+    height: 12px;
+  }
+}
+
+.animate-soundwave {
+  animation: soundwave 0.8s ease-in-out infinite;
+}
+
+@keyframes ambient-drift {
+  0% { transform: translate3d(-4%, -2%, 0) scale(1); }
+  50% { transform: translate3d(4%, 3%, 0) scale(1.05); }
+  100% { transform: translate3d(-4%, -2%, 0) scale(1); }
+}
+
+@keyframes ambient-glow {
+  0% { opacity: 0.45; }
+  50% { opacity: 0.7; }
+  100% { opacity: 0.45; }
+}
+
+@keyframes card-float {
+  0% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+  100% { transform: translateY(0); }
+}
+
+.room-ambient {
+  position: absolute;
+  inset: -20% -10% auto -10%;
+  height: 60vh;
+  pointer-events: none;
+  filter: blur(40px);
+}
+
+.room-ambient::before,
+.room-ambient::after {
+  content: "";
+  position: absolute;
+  width: 45vw;
+  height: 45vw;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, rgba(16, 185, 129, 0.35), rgba(16, 185, 129, 0.02) 60%);
+  animation: ambient-drift 14s ease-in-out infinite, ambient-glow 7s ease-in-out infinite;
+}
+
+.room-ambient::after {
+  right: 8%;
+  top: 10%;
+  width: 38vw;
+  height: 38vw;
+  background: radial-gradient(circle at 70% 70%, rgba(59, 130, 246, 0.25), rgba(59, 130, 246, 0.02) 60%);
+  animation-duration: 18s, 9s;
+}
+
+.room-card-float {
+  animation: card-float 7s ease-in-out infinite;
+}
+
+@keyframes music-bar {
+  0%, 100% { height: 100%; }
+  50% { height: 40%; }
+}
+
+.animate-music-bar {
+  animation: music-bar 0.8s ease-in-out infinite;
+}
+
+/* Cross-browser scrollbar utilities: hide or style scrollbars cleanly
+   - Uses ::-webkit-scrollbar for WebKit/Blink
+   - Uses feature query for Firefox's `scrollbar-width` to avoid lint warnings
+   - Keeps `-ms-overflow-style` for legacy Edge/IE
+   - Adds a `thin-scrollbar` utility for an elegant, low-visual-weight scrollbar
+*/
+@layer utilities {
+  /* Completely hide scrollbars while preserving scrolling */
+  .no-scrollbar {
+    -ms-overflow-style: none; /* IE and Edge */
+  }
+  .no-scrollbar::-webkit-scrollbar { /* Chrome, Safari, Opera */
+    display: none;
+    width: 0;
+    height: 0;
+  }
+  @supports (scrollbar-width: none) {
+    .no-scrollbar {
+      scrollbar-width: none; /* Firefox */
+    }
+  }
+  /* Only apply scrollbar-gutter when the browser supports it to avoid compatibility warnings */
+  @supports (scrollbar-gutter: stable) {
+    .no-scrollbar {
+      scrollbar-gutter: stable;
+    }
+  }
+
+  /* Thin, subtle scrollbar for when you want a lightweight indicator.
+     Also apply a dark, minimalist scrollbar to the main layout container
+     so the default bright/white OS/browser scrollbar doesn't clash with the theme. */
+  .thin-scrollbar {
+    overscroll-behavior: auto;
+  }
+
+  /* Apply sleek dark scrollbar styling to `main` and `.thin-scrollbar` */
+  main, .thin-scrollbar {
+    /* no vendor-only, keep standard defaults */
+  }
+
+  main::-webkit-scrollbar,
+  .thin-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  main::-webkit-scrollbar-track,
+  .thin-scrollbar::-webkit-scrollbar-track {
+    background: transparent; /* hide bright track */
+  }
+
+  main::-webkit-scrollbar-thumb,
+  .thin-scrollbar::-webkit-scrollbar-thumb {
+    background-color: rgba(39,39,42,0.6); /* subtle zinc/dark thumb */
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  /* Firefox: apply thin scrollbar and matching colors when supported */
+  @supports (scrollbar-width: thin) {
+    main, .thin-scrollbar {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(39,39,42,0.6) transparent;
+    }
+  }
+}
+
+/* CSS for room name scrolling in sidebar */
+.room-name-text {
+  display: block;
+  white-space: nowrap;
+  transition: transform 0.5s ease-out;
+}
+
+.room-name-text.should-scroll {
+  animation: slide-reveal 3s ease-in-out infinite;
+}
+
+@keyframes slide-reveal {
+  0%, 100% { 
+    transform: translateX(0); 
+  }
+  50% { 
+    transform: translateX(var(--scroll-distance, 0)); 
+  }
+}
+
