@@ -14,6 +14,15 @@ import {
   Plus,
   Volume2,
   X,
+  LayoutGrid,
+  Search,
+  MessageSquare,
+  Wrench,
+  DoorOpen,
+  Headphones,
+  MoreVertical,
+  Edit2,
+  Trash2
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useSocket } from "@/context/SocketContext";
@@ -22,7 +31,7 @@ import { useRoomVoice } from "@/context/RoomVoiceContext";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { usePathname, useRouter } from "next/navigation";
-import { PhoneOff, DoorOpen, Mic, MicOff, VolumeX, Headphones } from "lucide-react";
+import { PhoneOff, Mic, MicOff, VolumeX } from "lucide-react";
 import { toast } from "sonner";
 
 interface Room {
@@ -32,6 +41,9 @@ interface Room {
   participants: any[];
   maxParticipants: number;
   participantsCount?: number;
+  roomType?: string;
+  visibility?: string;
+  createdBy?: any;
 }
 
 const navItems = [
@@ -58,7 +70,11 @@ export function DashboardSidebar() {
     description: "",
     maxParticipants: 10,
     roomType: "public" as "public" | "private",
+    visibility: "visible" as "hidden" | "visible",
   });
+  const [joinRequestRoomId, setJoinRequestRoomId] = useState<string | null>(null);
+  const [editRoomModal, setEditRoomModal] = useState<{ roomId: string, name: string } | null>(null);
+  const [editing, setEditing] = useState(false);
   const [conflictModal, setConflictModal] = useState<{
     type: "in-call" | "in-room";
     targetRoomId: string;
@@ -74,11 +90,14 @@ export function DashboardSidebar() {
 
   useEffect(() => {
     fetchRooms();
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?._id]);
 
   const fetchRooms = async () => {
     try {
-      const response = await fetch("/api/rooms");
+      // Pass userId so the API can include the owner's own hidden rooms
+      const userId = user?._id || '';
+      const response = await fetch(`/api/rooms${userId ? `?userId=${userId}` : ''}`);
       const data = await response.json();
       if (response.ok && data.rooms) {
         setRooms((prev) => data.rooms.map((room: Room) => {
@@ -117,9 +136,102 @@ export function DashboardSidebar() {
 
     socket.on("room-count-updated", handleRoomCountUpdated);
     socket.on("rooms-counts", handleRoomsCounts);
+
+    // Real-time room list sync
+    // Guard: hidden private rooms are not broadcast by the server, but add a
+    // client-side check too so non-owners never see them even on race conditions.
+    const handleRoomCreated = (data: { room: Room }) => {
+      setRooms((prev) => {
+        if (prev.find(r => r._id === data.room._id)) return prev;
+        // Never add a hidden private room for non-owners
+        const creatorId = typeof data.room.createdBy === 'string'
+          ? data.room.createdBy
+          : (data.room.createdBy as any)?._id?.toString();
+        const isOwner = !!user?._id && creatorId === user._id.toString();
+        if (data.room.roomType === 'private' && data.room.visibility === 'hidden' && !isOwner) {
+          return prev;
+        }
+        return [data.room, ...prev];
+      });
+    };
+
+    const handleRoomDeleted = (data: { roomId: string }) => {
+      setRooms((prev) => prev.filter(r => r._id !== data.roomId));
+    };
+
+    const handleRoomUpdated = (data: { roomId: string; name: string }) => {
+      setRooms((prev) => prev.map(r => r._id === data.roomId ? { ...r, name: data.name } : r));
+    };
+
+    socket.on("room-created", handleRoomCreated);
+    socket.on("room-deleted", handleRoomDeleted);
+    socket.on("room-updated", handleRoomUpdated);
+
+    const handleJoinResponse = (data: { roomId: string, action: 'admit' | 'reject' }) => {
+      if (data.action === 'admit') {
+        toast.success("Request to join approved!");
+        setJoinRequestRoomId(null);
+        // Persist admission so re-clicking the room from another page/tab won't re-trigger a request
+        const admittedRooms: string[] = JSON.parse(localStorage.getItem('admitted-rooms') || '[]');
+        if (!admittedRooms.includes(data.roomId)) {
+          admittedRooms.push(data.roomId);
+          localStorage.setItem('admitted-rooms', JSON.stringify(admittedRooms));
+        }
+        sessionStorage.setItem('room-join-intent', 'true');
+        router.push(`/dashboard/rooms/${data.roomId}`);
+      } else {
+        toast.error("Request to join rejected.");
+        setJoinRequestRoomId(null);
+      }
+    };
+    socket.on("room-join-response", handleJoinResponse);
+
+    const handleJoinDenied = (data: { roomId: string; reason: string }) => {
+      toast.error(data.reason || "Access denied to this room.");
+      setJoinRequestRoomId(null);
+      // Remove from admitted rooms if denied at socket gate
+      const admittedRooms: string[] = JSON.parse(localStorage.getItem('admitted-rooms') || '[]');
+      localStorage.setItem('admitted-rooms', JSON.stringify(admittedRooms.filter(id => id !== data.roomId)));
+      router.push("/dashboard/members");
+    };
+    socket.on("join-denied", handleJoinDenied);
+
+    const handleInvitation = (data: { roomId: string; roomName: string; fromUserId: string }) => {
+      toast(
+        <div className="flex flex-col gap-2">
+          <p className="font-semibold text-white">Room Invitation</p>
+          <p className="text-zinc-400 text-sm">You've been invited to join <span className="text-white font-medium">{data.roomName}</span></p>
+          <div className="flex gap-2 mt-1">
+            <button
+              onClick={() => {
+                const admittedRooms: string[] = JSON.parse(localStorage.getItem('admitted-rooms') || '[]');
+                if (!admittedRooms.includes(data.roomId)) {
+                  admittedRooms.push(data.roomId);
+                  localStorage.setItem('admitted-rooms', JSON.stringify(admittedRooms));
+                }
+                sessionStorage.setItem('room-join-intent', 'true');
+                router.push(`/dashboard/rooms/${data.roomId}`);
+                toast.dismiss(`invite-${data.roomId}`);
+              }}
+              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition-colors"
+            >Join Room</button>
+            <button onClick={() => toast.dismiss(`invite-${data.roomId}`)} className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-semibold transition-colors">Dismiss</button>
+          </div>
+        </div>,
+        { duration: 30000, id: `invite-${data.roomId}` }
+      );
+    };
+    socket.on("room-invitation", handleInvitation);
+
     return () => {
       socket.off("room-count-updated", handleRoomCountUpdated);
       socket.off("rooms-counts", handleRoomsCounts);
+      socket.off("room-created", handleRoomCreated);
+      socket.off("room-deleted", handleRoomDeleted);
+      socket.off("room-updated", handleRoomUpdated);
+      socket.off("room-join-response", handleJoinResponse);
+      socket.off("join-denied", handleJoinDenied);
+      socket.off("room-invitation", handleInvitation);
     };
   }, [socket]);
 
@@ -146,7 +258,12 @@ export function DashboardSidebar() {
           description: "",
           maxParticipants: 10,
           roomType: "public",
+          visibility: "visible",
         });
+        
+        // Automatically enter the newly created room
+        sessionStorage.setItem('room-join-intent', 'true');
+        router.push(`/dashboard/rooms/${data.room._id}`);
       } else {
         toast.error(data.message || "Failed to create room");
       }
@@ -158,6 +275,32 @@ export function DashboardSidebar() {
     }
   };
 
+  const handleUpdateRoom = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editRoomModal?.name.trim() || !editRoomModal.roomId) return;
+    setEditing(true);
+    try {
+      const response = await fetch(`/api/rooms/${editRoomModal.roomId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: editRoomModal.name.trim() }),
+      });
+      const data = await response.json();
+      if (response.ok && data.room) {
+        setRooms(rooms.map(r => r._id === data.room._id ? data.room : r));
+        setEditRoomModal(null);
+        toast.success("Room renamed successfully");
+      } else {
+        toast.error(data.message || "Failed to update room");
+      }
+    } catch (error) {
+      console.error("Failed to update room:", error);
+      toast.error("Failed to update room");
+    } finally {
+      setEditing(false);
+    }
+  };
+
   const handleJoinRoom = async (roomId: string) => {
     const targetRoom = rooms.find(r => r._id === roomId);
     const targetName = targetRoom?.name || "this room";
@@ -166,6 +309,27 @@ export function DashboardSidebar() {
     if (isInRoom && currentRoomId === roomId) {
       sessionStorage.setItem('room-join-intent', 'true');
       router.push(`/dashboard/rooms/${roomId}`);
+      return;
+    }
+
+    // Already been admitted to this private room?
+    const admittedRooms: string[] = JSON.parse(localStorage.getItem('admitted-rooms') || '[]');
+    if (admittedRooms.includes(roomId)) {
+      sessionStorage.setItem('room-join-intent', 'true');
+      router.push(`/dashboard/rooms/${roomId}`);
+      return;
+    }
+
+    if (targetRoom && targetRoom.roomType === 'private' && targetRoom.visibility !== 'hidden' && targetRoom.createdBy?._id?.toString() !== user?._id?.toString()) {
+      if (!socket || !user) return;
+      setJoinRequestRoomId(roomId);
+      socket.emit("room-request-join", { 
+        roomId, 
+        userId: user._id, 
+        name: user.name, 
+        avatar: user.avatarConfig?.image || null, 
+        color: user.avatarConfig?.color || '#059669' 
+      });
       return;
     }
 
@@ -367,16 +531,21 @@ export function DashboardSidebar() {
                                 {rooms.length === 0 ? (
                                   <div className="text-xs text-zinc-600 p-2">No rooms yet</div>
                                 ) : (
-                                  rooms.map((room) => {
+                                  rooms.filter(r => {
+                                    // Final client-side safety net: hide private+hidden rooms from non-owners
+                                    const creatorId = typeof r.createdBy === 'string'
+                                      ? r.createdBy
+                                      : (r.createdBy as any)?._id?.toString?.() ?? '';
+                                    const isCreator = !!user?._id && creatorId === user._id.toString();
+                                    if (r.roomType === 'private' && r.visibility === 'hidden' && !isCreator) return false;
+                                    return true;
+                                  }).map((room) => {
                                     const isLive = (room.participantsCount ?? 0) > 0;
+                                    const isWaiting = joinRequestRoomId === room._id;
                                     return (
                                     <div
                                       key={room._id}
                                       className="group relative"
-                                      onContextMenu={(e) => {
-                                        e.preventDefault();
-                                        setContextMenu({ x: e.clientX, y: e.clientY, roomId: room._id });
-                                      }}
                                     >
                                       <button
                                         onClick={() => handleJoinRoom(room._id)}
@@ -416,6 +585,7 @@ export function DashboardSidebar() {
                                               const span = e.currentTarget.querySelector('.room-name-text') as HTMLSpanElement;
                                               if (span) {
                                                 span.classList.remove('should-scroll');
+                                                span.style.removeProperty('--scroll-distance');
                                               }
                                             }}
                                           >
@@ -423,7 +593,21 @@ export function DashboardSidebar() {
                                               {room.name}
                                             </span>
                                           </div>
-                                          {!isLive && (
+                                          {room.createdBy?._id === user?._id && (
+                                            <div
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                e.preventDefault();
+                                                const rect = e.currentTarget.getBoundingClientRect();
+                                                setContextMenu({ x: rect.left, y: rect.bottom + 5, roomId: room._id });
+                                              }}
+                                              className="opacity-0 group-hover:opacity-100 p-1 text-zinc-500 hover:text-white transition-all rounded hover:bg-zinc-800 cursor-pointer flex items-center justify-center"
+                                              role="button"
+                                            >
+                                              <MoreVertical className="w-3.5 h-3.5" />
+                                            </div>
+                                          )}
+                                          {!isLive && !isWaiting && (
                                             <span className="text-[10px] text-zinc-600 font-medium">0/{room.maxParticipants}</span>
                                           )}
                                         </div>
@@ -606,6 +790,32 @@ export function DashboardSidebar() {
                         </select>
                       </div>
                     </div>
+
+                    {formData.roomType === "private" && (
+                      <div className="space-y-2 col-span-2">
+                        <label className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                          Visibility
+                        </label>
+                        <div className="relative">
+                          <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
+                            <ChevronDown className="w-4 h-4 text-zinc-500" />
+                          </div>
+                          <select
+                            value={formData.visibility}
+                            onChange={(e) =>
+                              setFormData({
+                                ...formData,
+                                visibility: e.target.value as "hidden" | "visible",
+                              })
+                            }
+                            className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 rounded-xl text-white focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all appearance-none cursor-pointer"
+                          >
+                            <option value="visible">Visible (Request to Join)</option>
+                            <option value="hidden">Hidden (Invite Only)</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex gap-3 pt-4">
@@ -635,6 +845,130 @@ export function DashboardSidebar() {
                         )}
                       </span>
                       <div className="absolute inset-0 bg-gradient-to-r from-emerald-600 via-emerald-500 to-emerald-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {editRoomModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", duration: 0.5, bounce: 0.3 }}
+              className="bg-zinc-950 border border-zinc-800 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-500" />
+              <div className="relative z-10">
+                <h3 className="text-2xl font-bold text-white mb-2 tracking-tight">Edit Room</h3>
+                <p className="text-sm text-zinc-400 mb-8">Rename your room.</p>
+                <form onSubmit={handleUpdateRoom} className="space-y-6">
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                      Room Name <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative group">
+                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <MessageSquare className="w-4 h-4 text-zinc-500 group-focus-within:text-emerald-500 transition-colors" />
+                      </div>
+                      <input
+                        type="text"
+                        required
+                        maxLength={50}
+                        value={editRoomModal.name}
+                        onChange={(e) => setEditRoomModal({ ...editRoomModal, name: e.target.value })}
+                        className="w-full pl-11 pr-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-zinc-600 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all"
+                        placeholder="e.g. Daily Standup"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-3 pt-4">
+                    <button
+                      type="button"
+                      onClick={() => setEditRoomModal(null)}
+                      className="flex-1 px-4 py-3 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl transition-all font-medium cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={editing || !editRoomModal.name.trim()}
+                      className="flex-1 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl transition-all font-medium cursor-pointer disabled:opacity-50"
+                    >
+                      {editing ? "Saving..." : "Save Changes"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {editRoomModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", duration: 0.5, bounce: 0.3 }}
+              className="bg-zinc-950 border border-zinc-800 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-500" />
+              <div className="relative z-10">
+                <h3 className="text-2xl font-bold text-white mb-2 tracking-tight">Edit Room</h3>
+                <p className="text-sm text-zinc-400 mb-8">Rename your room.</p>
+                <form onSubmit={handleUpdateRoom} className="space-y-6">
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                      Room Name <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative group">
+                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <MessageSquare className="w-4 h-4 text-zinc-500 group-focus-within:text-emerald-500 transition-colors" />
+                      </div>
+                      <input
+                        type="text"
+                        required
+                        maxLength={50}
+                        value={editRoomModal.name}
+                        onChange={(e) => setEditRoomModal({ ...editRoomModal, name: e.target.value })}
+                        className="w-full pl-11 pr-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-zinc-600 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all"
+                        placeholder="e.g. Daily Standup"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-3 pt-4">
+                    <button
+                      type="button"
+                      onClick={() => setEditRoomModal(null)}
+                      className="flex-1 px-4 py-3 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl transition-all font-medium cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={editing || !editRoomModal.name.trim()}
+                      className="flex-1 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl transition-all font-medium cursor-pointer disabled:opacity-50"
+                    >
+                      {editing ? "Saving..." : "Save Changes"}
                     </button>
                   </div>
                 </form>
@@ -858,16 +1192,53 @@ export function DashboardSidebar() {
           >
             <button
               onClick={() => {
+                const r = rooms.find(rm => rm._id === contextMenu.roomId);
+                if (r) setEditRoomModal({ roomId: r._id, name: r.name });
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2 cursor-pointer"
+            >
+              <Edit2 className="w-3.5 h-3.5" />
+              Edit Room
+            </button>
+            <button
+              onClick={() => {
                 handleDeleteRoom(contextMenu.roomId, { stopPropagation: () => {} } as any);
                 setContextMenu(null);
               }}
               className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors flex items-center gap-2 cursor-pointer"
             >
-              <X className="w-3.5 h-3.5" />
+              <Trash2 className="w-3.5 h-3.5" />
               Delete Room
             </button>
           </div>
         </>
+      )}
+      {/* Waiting for Approval Overlay in Main Content Area */}
+      {joinRequestRoomId && (
+        <div 
+          className="fixed inset-y-0 right-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm pointer-events-auto transition-all duration-300" 
+          style={{ left: isCollapsed ? '80px' : '280px' }}
+        >
+          <div className="bg-zinc-950 border border-emerald-900/30 p-8 rounded-3xl flex flex-col items-center gap-6 shadow-[0_0_50px_rgba(16,185,129,0.1)] max-w-sm mx-4 animate-in fade-in zoom-in duration-300">
+             <div className="relative flex items-center justify-center">
+                <div className="w-16 h-16 rounded-full border-4 border-emerald-500/20 border-t-emerald-500 animate-spin" />
+                <DoorOpen className="w-6 h-6 text-emerald-500 absolute" />
+             </div>
+             <div className="text-center space-y-2">
+               <h2 className="text-xl font-semibold text-white tracking-tight">Request Sent</h2>
+               <p className="text-sm text-zinc-400 leading-relaxed">
+                 Waiting for the room owner to let you in...
+               </p>
+             </div>
+             <button 
+               onClick={() => setJoinRequestRoomId(null)}
+               className="mt-2 w-full px-6 py-3 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white rounded-xl transition-colors text-sm font-medium border border-zinc-800 hover:border-zinc-700 cursor-pointer"
+             >
+               Cancel Request
+             </button>
+          </div>
+        </div>
       )}
 
 

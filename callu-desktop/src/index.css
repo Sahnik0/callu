@@ -147,3 +147,115 @@ html.lenis, html.lenis body { height: auto; }
   }
 }
 
+.hero-grid {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  mask-image: radial-gradient(ellipse 110% 70% at 50% 0%, #000 25%, transparent 85%);
+  pointer-events: none;
+}
+
+/* Primary grid: subtle, soft glow */
+.hero-grid::before {
+  content: "";
+  position: absolute;
+  inset: -20%;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-size: 36px 36px;
+  opacity: 0.6;
+  filter: blur(0.2px);
+}
+
+/* Accent grid: emerald sheen + slow drift */
+.hero-grid::after {
+  content: "";
+  position: absolute;
+  inset: -25%;
+  background-image:
+    linear-gradient(to right, rgba(16, 185, 129, 0.16) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(16, 185, 129, 0.16) 1px, transparent 1px);
+  background-size: 28px 28px;
+  animation: grid-breathe 9s ease-in-out infinite, grid-drift 28s linear infinite;
+  mix-blend-mode: screen;
+  opacity: 0.5;
+}
+
+/* Soft noise layer to break perfect lines */
+.hero-grid .hero-grid-noise {
+  position: absolute;
+  inset: -10%;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 18px 18px;
+  opacity: 0.25;
+  filter: blur(0.6px);
+  mix-blend-mode: soft-light;
+  animation: noise-float 16s ease-in-out infinite;
+}
+
+@keyframes grid-drift {
+  0% { transform: translate3d(0, 0, 0) rotate(-0.5deg) scale(1); }
+  50% { transform: translate3d(12px, 10px, 0) rotate(0.5deg) scale(1.01); }
+  100% { transform: translate3d(0, 0, 0) rotate(-0.5deg) scale(1); }
+}
+
+@keyframes noise-float {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(-6px, 4px, 0); }
+}
+
+@keyframes grid-breathe {
+  0%, 100% { opacity: 0.35; filter: brightness(0.9); }
+  50% { opacity: 0.9; filter: brightness(1.2); }
+}
+
+@keyframes pulse-slow {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 0.75; }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 6s ease-in-out infinite;
+}
+
+/* ─── Hero CTA Micro-interactions ─────────────────────────────── */
+
+@keyframes bounce-down {
+  0%, 100% { transform: translateY(0); }
+  40% { transform: translateY(4px); }
+  70% { transform: translateY(-2px); }
+}
+
+.group:hover .icon-bounce {
+  animation: bounce-down 0.6s ease infinite;
+}
+
+@keyframes badge-float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-3px); }
+}
+
+.badge-float {
+  animation: badge-float 3s ease-in-out infinite;
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.hero-fade-1 { animation: fade-up 0.6s ease forwards; opacity: 0; }
+.hero-fade-2 { animation: fade-up 0.6s 0.15s ease forwards; opacity: 0; }
+.hero-fade-3 { animation: fade-up 0.6s 0.3s ease forwards; opacity: 0; }
+.hero-fade-4 { animation: fade-up 0.6s 0.45s ease forwards; opacity: 0; }
+.hero-fade-5 { animation: fade-up 0.6s 0.6s ease forwards; opacity: 0; }
+
+@keyframes sweep {
+  0% { left: -100%; }
+  100% { left: 200%; }
+}
+
+.animate-sweep {
+  animation: sweep 1s ease-in-out;
+}
