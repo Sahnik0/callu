@@ -8,7 +8,7 @@ import {
   Volume2, VolumeX, PhoneOff, Mic, MicOff,
   Video, VideoOff, MonitorUp, MonitorOff,
   PictureInPicture2, LayoutGrid, Maximize2, Minimize2,
-  Wrench, Music, MessageSquare, X, Paperclip, Send, File as FileIcon, Smile, ChevronDown,
+  Wrench, Music, MessageSquare, X, Paperclip, Send, File as FileIcon, Smile, ChevronDown, UserCheck, UserMinus, Users, UserPlus, Search,
 } from "lucide-react";
 import { useSocket } from "@/context/SocketContext";
 import { useRoomVoice } from "@/context/RoomVoiceContext";
@@ -28,6 +28,7 @@ interface Room {
   maxParticipants: number;
   isActive: boolean;
   roomType: "public" | "private";
+  visibility?: "hidden" | "visible";
 }
 
 interface ChatAttachment {
@@ -50,12 +51,14 @@ interface ChatMessage {
   createdAt: string;
 }
 
+const ENABLE_HOVER_CHAT = false;
+
 export default function RoomVoiceChatPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const params = useParams();
   const roomId = params?.roomId as string;
-  const { socket } = useSocket();
+  const { socket, onlineUsers: socketOnlineUserIds } = useSocket();
 
   // ─── Voice state from persistent context ────────────────────────
   const {
@@ -110,6 +113,12 @@ export default function RoomVoiceChatPage() {
   const [showMicMenu, setShowMicMenu] = useState(false);
   const [showSpeakerMenu, setShowSpeakerMenu] = useState(false);
   const [isScreenShareFullscreen, setIsScreenShareFullscreen] = useState(false);
+  const [joinRequests, setJoinRequests] = useState<Array<{userId: string, name: string, avatar: string | null, color: string}>>([]);
+  const [showRequestsPanel, setShowRequestsPanel] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [onlineUsers, setOnlineUsers] = useState<Array<{_id: string, name: string, avatarConfig?: {image?: string, color?: string}}>>([]);
+  const [inviteSearch, setInviteSearch] = useState("");
+  const [sentInvites, setSentInvites] = useState<Set<string>>(new Set());
 
   const chatListRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -191,6 +200,62 @@ export default function RoomVoiceChatPage() {
       };
     }
   }, [isScreenShareFullscreen]);
+
+  useEffect(() => {
+    if (!socket || !roomId) return;
+    
+    const handleJoinRequest = (data: { roomId: string, user: any }) => {
+      if (data.roomId === roomId) {
+        setJoinRequests(prev => {
+          if (prev.find(r => r.userId === data.user.userId)) return prev;
+          return [...prev, data.user];
+        });
+        
+        // Play sound for the incoming request
+        const audio = new Audio('/music/request_sound.mp3');
+        audio.volume = 1.0;
+        audio.play().catch(err => console.warn('Join request sound blocked:', err));
+      }
+    };
+    
+    const handleJoinRequestsList = (data: { roomId: string, requests: any[] }) => {
+      if (data.roomId === roomId) {
+        setJoinRequests(data.requests);
+      }
+    };
+
+    socket.on("room-join-request", handleJoinRequest);
+    socket.on("room-join-requests-list", handleJoinRequestsList);
+    
+    if (user?._id && room?.createdBy?._id === user._id) {
+      socket.emit("room-get-join-requests", { roomId });
+    }
+
+    return () => {
+      socket.off("room-join-request", handleJoinRequest);
+      socket.off("room-join-requests-list", handleJoinRequestsList);
+    };
+  }, [socket, roomId, room, user]);
+
+  // ─── Online users list + room-invitation listener ───────────────
+  useEffect(() => {
+    const fetchOnlineUsers = async () => {
+      if (!socketOnlineUserIds || !socketOnlineUserIds.length) {
+        setOnlineUsers([]);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/users?ids=${socketOnlineUserIds.join(',')}`);
+        if (res.ok) {
+          const data = await res.json();
+          setOnlineUsers(data.users || []);
+        }
+      } catch {}
+    };
+    fetchOnlineUsers();
+  }, [socketOnlineUserIds]);
+
+
 
   // ─── Pre-warm canvas PiP stream on mount ─────────────────────────
   useEffect(() => {
@@ -528,6 +593,23 @@ export default function RoomVoiceChatPage() {
     const init = async () => {
       const roomData = await fetchRoomDetails();
       if (!roomData) return;
+
+      // ── Private room access guard ────────────────────────────────
+      // If the room is private+visible and the current user is NOT the owner,
+      // they must go through the sidebar "Ask to Join" flow — block direct URL access.
+      // Exception: if 'room-join-intent' is in sessionStorage, the user was either
+      // admitted by the owner or navigated here via the sidebar (both cases are allowed).
+      const isPrivate = roomData.roomType === "private" && roomData.visibility !== "hidden";
+      const isOwner = roomData.createdBy?._id?.toString() === user?._id?.toString();
+      const hasJoinIntent = sessionStorage.getItem('room-join-intent') === 'true';
+      // Delay removal to survive React Strict Mode double-mounts
+      setTimeout(() => sessionStorage.removeItem('room-join-intent'), 2000);
+      
+      if (isPrivate && !isOwner && !hasJoinIntent) {
+        toast.error("This is a private room. Please request to join from the sidebar.");
+        navigate("/dashboard/members");
+        return;
+      }
 
       const success = await joinVoice(roomId, roomData.name);
       if (success) {
@@ -1264,6 +1346,18 @@ export default function RoomVoiceChatPage() {
                 </span>
               )}
             </button>
+
+            {/* Invite button — visible only to room owner */}
+            {room?.createdBy?._id === user?._id && (
+              <button
+                onClick={() => { setShowInviteModal(true); setSentInvites(new Set()); setInviteSearch(""); }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-700 transition-all text-xs font-semibold"
+                title="Invite users to this room"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                Invite
+              </button>
+            )}
           </div>
         </header>
 
@@ -1995,6 +2089,28 @@ export default function RoomVoiceChatPage() {
 
             <div className="w-px h-8 bg-zinc-800" />
 
+            {/* Join Requests panel button — owner only */}
+            {room?.createdBy?._id === user?._id && room?.roomType === 'private' && room?.visibility !== 'hidden' && (
+              <button
+                onClick={() => setShowRequestsPanel(p => !p)}
+                className={`p-3 md:p-3.5 rounded-xl transition-all duration-200 group relative cursor-pointer ${
+                  showRequestsPanel
+                    ? 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25'
+                    : 'bg-zinc-800/50 text-zinc-400 hover:bg-zinc-700 hover:text-white'
+                }`}
+              >
+                <Users className="w-5 h-5" />
+                {joinRequests.length > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-black text-[9px] font-bold flex items-center justify-center shadow-lg">
+                    {joinRequests.length > 9 ? '9+' : joinRequests.length}
+                  </span>
+                )}
+                <span className="absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-zinc-950 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none border border-zinc-800">
+                  Join Requests
+                </span>
+              </button>
+            )}
+
             {/* Leave */}
             <button
               tabIndex={-1}
@@ -2024,12 +2140,127 @@ export default function RoomVoiceChatPage() {
       )}
 
       {/* Edge trigger to open chat on hover */}
-      {!isChatOpen && (
+      {ENABLE_HOVER_CHAT && !isChatOpen && (
         <div 
           className="absolute top-0 right-0 h-full w-4 z-[45] hidden sm:block" 
           onMouseEnter={() => setIsChatOpen(true)}
         />
       )}
+
+      {/* ── Join Requests Side Panel (Google Meet style) ── */}
+      <AnimatePresence>
+        {showRequestsPanel && room?.createdBy?._id === user?._id && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/40 z-[55] sm:hidden"
+              onClick={() => setShowRequestsPanel(false)}
+            />
+            <motion.aside
+              initial={{ x: 480, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 480, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 260, damping: 30 }}
+              className="absolute top-0 right-0 h-full w-full sm:w-[360px] bg-zinc-950/95 backdrop-blur-xl border-l border-zinc-800/60 z-[60] flex flex-col min-h-0 shadow-2xl ring-1 ring-white/5"
+            >
+              {/* Header */}
+              <div className="px-5 py-4 border-b border-zinc-800/70 flex items-center justify-between bg-gradient-to-b from-zinc-950/90 to-transparent flex-shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                    <Users className="w-4 h-4 text-amber-400" />
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wider text-zinc-500">Admission</p>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-white font-semibold tracking-tight">Join Requests</h3>
+                      {joinRequests.length > 0 && (
+                        <span className="flex items-center gap-1 text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-full">
+                          <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-pulse" />
+                          {joinRequests.length} waiting
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {joinRequests.length > 1 && (
+                    <button
+                      onClick={() => socket?.emit('room-respond-join-request', { roomId, action: 'admit-all' })}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/30 text-xs font-semibold transition-all border border-emerald-500/20 cursor-pointer"
+                    >
+                      Admit All
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowRequestsPanel(false)}
+                    className="p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800/60 transition cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain no-scrollbar px-4 py-4 space-y-3">
+                {joinRequests.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-center text-zinc-500 gap-3 py-16">
+                    <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+                      <Users className="w-7 h-7 text-amber-400/70" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-zinc-400">No pending requests</p>
+                      <p className="text-xs text-zinc-600 mt-1">People asking to join will appear here</p>
+                    </div>
+                  </div>
+                ) : (
+                  joinRequests.map((req, i) => (
+                    <motion.div
+                      key={req.userId}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, x: 40 }}
+                      transition={{ delay: i * 0.04 }}
+                      className="flex items-center gap-3 p-3 rounded-2xl bg-zinc-900/60 border border-zinc-800/50 hover:border-zinc-700/60 transition-all"
+                    >
+                      <div
+                        className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-sm font-bold text-white overflow-hidden border-2"
+                        style={{ backgroundColor: req.avatar ? undefined : req.color, borderColor: req.color + '60' }}
+                      >
+                        {req.avatar
+                          ? <img src={req.avatar} alt={req.name} className="w-full h-full object-cover" />
+                          : req.name[0]?.toUpperCase()
+                        }
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-white truncate">{req.name}</p>
+                        <p className="text-[10px] text-zinc-500">Wants to join</p>
+                      </div>
+                      <div className="flex gap-2 flex-shrink-0">
+                        <button
+                          onClick={() => socket?.emit('room-respond-join-request', { roomId, userId: req.userId, action: 'admit' })}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/30 text-xs font-semibold transition-all border border-emerald-500/20 cursor-pointer"
+                        >
+                          <UserCheck className="w-3.5 h-3.5" />
+                          Admit
+                        </button>
+                        <button
+                          onClick={() => socket?.emit('room-respond-join-request', { roomId, userId: req.userId, action: 'reject' })}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-500/15 text-red-400 hover:bg-red-500/30 text-xs font-semibold transition-all border border-red-500/20 cursor-pointer"
+                        >
+                          <UserMinus className="w-3.5 h-3.5" />
+                          Deny
+                        </button>
+                      </div>
+                    </motion.div>
+                  ))
+                )}
+              </div>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Room Chat Panel */}
       <AnimatePresence>
@@ -2290,6 +2521,104 @@ export default function RoomVoiceChatPage() {
         disablePictureInPicture={false}
         style={{ position: "fixed", width: 1, height: 1, opacity: 0, pointerEvents: "none", top: 0, left: 0, zIndex: -1 }}
       />
+
+      {/* Old floating popup removed — join requests are now in the side panel */}
+
+      {/* ─── Invite Users Modal ─── */}
+      <AnimatePresence>
+        {showInviteModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[200] p-4"
+            onClick={(e) => { if (e.target === e.currentTarget) setShowInviteModal(false); }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", duration: 0.4, bounce: 0.25 }}
+              className="bg-zinc-900 border border-zinc-800/60 rounded-2xl p-6 w-full max-w-md shadow-2xl relative overflow-hidden"
+            >
+              <div className="absolute top-0 right-0 w-48 h-48 bg-emerald-500/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none" />
+              <div className="relative z-10">
+                <div className="flex items-center justify-between mb-5">
+                  <div>
+                    <h2 className="text-lg font-bold text-white">Invite to Room</h2>
+                    <p className="text-xs text-zinc-500 mt-0.5">Select online users to invite to <span className="text-zinc-300">{room?.name}</span></p>
+                  </div>
+                  <button onClick={() => setShowInviteModal(false)} className="p-2 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-white transition-all cursor-pointer">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="relative mb-4">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500" />
+                  <input
+                    type="text"
+                    placeholder="Search users..."
+                    value={inviteSearch}
+                    onChange={(e) => setInviteSearch(e.target.value)}
+                    className="w-full pl-9 pr-4 py-2.5 bg-zinc-950/60 border border-zinc-800 rounded-xl text-white placeholder-zinc-600 text-sm focus:outline-none focus:border-emerald-500/50 transition-all"
+                  />
+                </div>
+                <div className="space-y-1.5 max-h-64 overflow-y-auto no-scrollbar pr-1">
+                  {onlineUsers
+                    .filter(u => {
+                      if (u._id === user?._id) return false;
+                      if (participants.some(p => p.userId === u._id)) return false;
+                      if (inviteSearch) return u.name.toLowerCase().includes(inviteSearch.toLowerCase());
+                      return true;
+                    })
+                    .map(u => {
+                      const alreadySent = sentInvites.has(u._id);
+                      return (
+                        <div key={u._id} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-zinc-800/50 transition-all">
+                          <div
+                            className="w-9 h-9 rounded-full overflow-hidden flex-shrink-0 flex items-center justify-center text-sm font-bold text-white"
+                            style={{ backgroundColor: u.avatarConfig?.color || '#27272a' }}
+                          >
+                            {u.avatarConfig?.image
+                              ? <img src={u.avatarConfig.image} alt={u.name} className="w-full h-full object-cover" />
+                              : u.name?.[0]?.toUpperCase()
+                            }
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-white truncate">{u.name}</p>
+                            <div className="flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                              <span className="text-[10px] text-zinc-500">Online</span>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              if (alreadySent) return;
+                              socket?.emit("room-invite-user", { roomId, roomName: room?.name, targetUserId: u._id });
+                              setSentInvites(prev => new Set(prev).add(u._id));
+                              toast.success(`Invitation sent to ${u.name}`);
+                            }}
+                            disabled={alreadySent}
+                            className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                              alreadySent
+                                ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                                : 'bg-emerald-600/20 text-emerald-400 border border-emerald-600/30 hover:bg-emerald-600/30'
+                            }`}
+                          >
+                            {alreadySent ? 'Sent ✓' : 'Invite'}
+                          </button>
+                        </div>
+                      );
+                    })
+                  }
+                  {onlineUsers.filter(u => u._id !== user?._id && !participants.some(p => p.userId === u._id)).length === 0 && (
+                    <div className="text-center py-8 text-zinc-600 text-sm">No other online users to invite</div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes music-bar {
